@@ -1,20 +1,19 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# @Time    : 2019-10-21 21:07
+# @Author  : xingfa.gxf
+# @File    : beanstalked_sample.py
 """beanstalkc - A beanstalkd Client Library for Python"""
-
+import six
 import logging
 import socket
 import sys
 
-
 __license__ = '''
 Copyright (C) 2008-2016 Andreas Bolka
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
-
     http://www.apache.org/licenses/LICENSE-2.0
-
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,7 +23,6 @@ limitations under the License.
 
 __version__ = '0.4.0'
 
-
 DEFAULT_HOST = 'localhost'
 DEFAULT_PORT = 11300
 DEFAULT_PRIORITY = 2 ** 31
@@ -32,10 +30,21 @@ DEFAULT_TTR = 120
 DEFAULT_TUBE_NAME = 'default'
 
 
-class BeanstalkcException(Exception): pass
-class UnexpectedResponse(BeanstalkcException): pass
-class CommandFailed(BeanstalkcException): pass
-class DeadlineSoon(BeanstalkcException): pass
+class BeanstalkcException(Exception):
+    pass
+
+
+class UnexpectedResponse(BeanstalkcException):
+    pass
+
+
+class CommandFailed(BeanstalkcException):
+    pass
+
+
+class DeadlineSoon(BeanstalkcException):
+    pass
+
 
 class SocketError(BeanstalkcException):
     @staticmethod
@@ -60,6 +69,8 @@ class Connection(object):
         self._parse_yaml = parse_yaml or (lambda x: x)
         self.host = host
         self.port = port
+        self._socket = None
+        self._socket_file = None
         self.connect()
 
     def __enter__(self):
@@ -79,7 +90,7 @@ class Connection(object):
     def close(self):
         """Close connection to server."""
         try:
-            self._socket.sendall('quit\r\n')
+            self._socket.sendall('quit\r\n'.encode())
         except socket.error:
             pass
         try:
@@ -92,9 +103,16 @@ class Connection(object):
         self.close()
         self.connect()
 
-    def _interact(self, command, expected_ok, expected_err=[]):
-        SocketError.wrap(self._socket.sendall, command)
+    def _interact(self, command, expected_ok, expected_err=None):
+        if expected_err is None:
+            expected_err = []
+        if six.PY2:
+            SocketError.wrap(self._socket.sendall, command)
+        else:
+            SocketError.wrap(self._socket.sendall, command.encode())
+            expected_ok = [s.encode() for s in expected_ok]
         status, results = self._read_response()
+
         if status in expected_ok:
             return results
         elif status in expected_err:
@@ -116,7 +134,9 @@ class Connection(object):
             raise SocketError()
         return body
 
-    def _interact_value(self, command, expected_ok, expected_err=[]):
+    def _interact_value(self, command, expected_ok, expected_err=None):
+        if expected_err is None:
+            expected_err = []
         return self._interact(command, expected_ok, expected_err)[0]
 
     def _interact_job(self, command, expected_ok, expected_err, reserved=True):
@@ -124,7 +144,9 @@ class Connection(object):
         body = self._read_body(int(size))
         return Job(self, int(jid), body, reserved)
 
-    def _interact_yaml(self, command, expected_ok, expected_err=[]):
+    def _interact_yaml(self, command, expected_ok, expected_err=None):
+        if expected_err is None:
+            expected_err = []
         size, = self._interact(command, expected_ok, expected_err)
         body = self._read_body(int(size))
         return self._parse_yaml(body)
@@ -141,7 +163,7 @@ class Connection(object):
         """Put a job into the current tube. Returns job id."""
         assert isinstance(body, str), 'Job body must be a str instance'
         jid = self._interact_value('put %d %d %d %d\r\n%s\r\n' % (
-                                       priority, delay, ttr, len(body), body),
+            priority, delay, ttr, len(body), body),
                                    ['INSERTED'],
                                    ['JOB_TOO_BIG', 'BURIED', 'DRAINING'])
         return int(jid)
@@ -313,5 +335,12 @@ class Job(object):
 
 
 if __name__ == '__main__':
-    import nose
-    nose.main(argv=['nosetests', '-c', '.nose.cfg'])
+    bt = Connection(host='30.28.7.127', port=11300)
+    bt.use('data_test')
+    # job = bt.reserve()
+    import json
+
+    bt.put(json.dumps({'a': 'Hello World'}))
+    # print(json.loads(job.body))
+    # bt.delete(job)
+    bt.close()
